@@ -1,5 +1,10 @@
 AquaTidyBot is a Discord bot that helps users stay hydrated, check their bottles, and clean their rooms with periodic reminders and role management.
 
+
+Use this link to add to your server:
+
+https://discord.com/oauth2/authorize?client_id=1247629331660931082&permissions=8796361590784&integration_type=0&scope=bot
+
 Features
 Users can react to a message to get assigned specific roles.
 Periodic reminders are sent to remind users to hydrate, check their bottles, and clean their rooms.

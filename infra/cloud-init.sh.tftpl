@@ -1,0 +1,87 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y docker.io jq
+systemctl enable --now docker
+
+# The dedicated Lightsail disk is attached by Terraform at this path.
+# Fail closed instead of selecting an arbitrary disk or writing to the root disk.
+disk=/dev/xvdf
+for _ in $(seq 1 120); do
+  [ -b "$disk" ] && break
+  sleep 5
+done
+[ -b "$disk" ] || { echo 'Persistent Lightsail disk not attached at /dev/xvdf' >&2; exit 1; }
+filesystem=$(lsblk -dn -o FSTYPE "$disk")
+if [ -z "$filesystem" ]; then
+  # Only initialize an empty disk. Refuse a partitioned or signed disk.
+  [ "$(lsblk -n -o NAME "$disk" | wc -l)" -eq 1 ]
+  [ -z "$(wipefs --no-act --noheadings --output TYPE "$disk")" ]
+  mkfs.ext4 "$disk"
+else
+  [ "$filesystem" = ext4 ] || { echo 'Unexpected data filesystem' >&2; exit 1; }
+fi
+uuid=$(blkid -s UUID -o value "$disk")
+mkdir -p /var/lib/aquatidy
+printf 'UUID=%s /var/lib/aquatidy ext4 defaults 0 2\n' "$uuid" >> /etc/fstab
+mount /var/lib/aquatidy
+chmod 700 /var/lib/aquatidy
+mkdir -p /var/lib/aquatidy/data
+cat > /etc/aquatidy.json <<'CONFIG'
+{"repository":"${repository}"}
+CONFIG
+cat > /usr/local/bin/aquatidy-deploy <<'DEPLOY'
+${deploy_script}
+DEPLOY
+cat > /usr/local/bin/aquatidy-run <<'RUN'
+${run_script}
+RUN
+chmod 700 /usr/local/bin/aquatidy-deploy /usr/local/bin/aquatidy-run
+cat > /etc/systemd/system/aquatidy.service <<'SERVICE'
+[Unit]
+Description=AquaTidy Discord bot
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/aquatidy
+ConditionPathExists=/var/lib/aquatidy/image
+
+[Service]
+ExecStartPre=/usr/bin/mountpoint -q /var/lib/aquatidy
+ExecStartPre=-/usr/bin/docker rm -f aquatidy
+ExecStart=/usr/local/bin/aquatidy-run
+ExecStop=-/usr/bin/docker stop --time 30 aquatidy
+Restart=always
+RestartSec=10
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+systemctl daemon-reload
+systemctl enable aquatidy
+# /run is cleared on reboot. Deployments need this readiness marker then too.
+cat > /etc/systemd/system/aquatidy-ready.service <<'SERVICE'
+[Unit]
+Description=Mark AquaTidy host ready for deployments
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/var/lib/aquatidy
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mountpoint -q /var/lib/aquatidy
+ExecStart=/usr/bin/touch /run/aquatidy-ready
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+systemctl daemon-reload
+systemctl enable --now aquatidy-ready
+# Rehydrate a replacement instance from the image selection on the preserved disk.
+if [ -f /var/lib/aquatidy/image ]; then
+  systemctl start aquatidy
+fi

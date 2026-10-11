@@ -1,0 +1,10 @@
+# Rename to backend.tf and fill in an existing private, versioned state bucket.
+terraform {
+  backend "s3" {
+    bucket       = "replace-with-your-state-bucket"
+    key          = "aquatidy/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

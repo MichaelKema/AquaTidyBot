@@ -1,0 +1,6 @@
+aws_region               = "us-east-1"
+availability_zone        = "us-east-1a"
+name                     = "aquatidy"
+bundle_id                = "small_3_0"
+github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+github_repository       = "MichaelKema/AquaTidyBot"

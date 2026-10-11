@@ -1,0 +1,13 @@
+# Settings from your existing Lightsail instance. This mode leaves the
+# instance, current IP and firewall outside Terraform management.
+aws_region               = "us-east-1"
+availability_zone        = "us-east-1a"
+name                     = "aquatidy"
+existing_instance_name   = "AquaTidy"
+# Replace with the instance ARN returned by aws lightsail get-instance.
+existing_instance_arn     = "arn:aws:lightsail:us-east-1:123456789012:Instance/REPLACE-WITH-INSTANCE-ID"
+# Enable only when your account has no GitHub OIDC provider.
+create_github_oidc_provider = true
+github_repository       = "MichaelKema/AquaTidyBot"
+# Terraform adds a separate data disk, independent of the existing 20 GB root disk.
+data_disk_size           = 8

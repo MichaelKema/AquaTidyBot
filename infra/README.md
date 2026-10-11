@@ -22,6 +22,12 @@ terraform -chdir=infra apply deployment.tfplan
 terraform -chdir=infra output
 ```
 
+The committed provider lock file includes checksums for Apple Silicon macOS and the Linux x86_64 GitHub runner. When upgrading providers, regenerate both platform hashes before pushing:
+
+```sh
+terraform -chdir=infra providers lock -platform=darwin_arm64 -platform=linux_amd64
+```
+
 The example uses local state. For shared state, copy `backend.s3.tf.example` to `backend.tf` and configure an existing private, encrypted, versioned S3 bucket, then run `terraform init -migrate-state`. State, variables and plan files are ignored by Git. Keep state backups.
 
 The only inbound port is SSH. The default allows TCP 22 from any IPv4 address because hosted GitHub runners have changing addresses; SSH still requires credentials. With a runner that has fixed egress, restrict `ssh_cidrs` to that range and update the workflow's runner. Password authentication should remain disabled. No web ports are needed for this bot.

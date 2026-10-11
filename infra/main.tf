@@ -13,6 +13,7 @@ resource "aws_lightsail_instance" "bot" {
   bundle_id         = var.bundle_id
   user_data = templatefile("${path.module}/cloud-init.sh.tftpl", {
     repository    = lower(var.github_repository)
+    backup_script = file("${path.module}/scripts/backup.sh")
     deploy_script = file("${path.module}/scripts/deploy.sh")
     run_script    = file("${path.module}/scripts/run.sh")
   })
@@ -40,7 +41,17 @@ resource "aws_lightsail_static_ip_attachment" "bot" {
   instance_name  = local.instance_name
 }
 
+moved {
+  from = aws_lightsail_disk.data
+  to   = aws_lightsail_disk.data[0]
+}
+moved {
+  from = aws_lightsail_disk_attachment.data
+  to   = aws_lightsail_disk_attachment.data[0]
+}
+
 resource "aws_lightsail_disk" "data" {
+  count             = var.retain_legacy_data_disk ? 1 : 0
   name              = "${var.name}-data"
   availability_zone = var.availability_zone
   size_in_gb        = var.data_disk_size
@@ -50,7 +61,8 @@ resource "aws_lightsail_disk" "data" {
   }
 }
 resource "aws_lightsail_disk_attachment" "data" {
-  disk_name     = aws_lightsail_disk.data.name
+  count         = var.retain_legacy_data_disk ? 1 : 0
+  disk_name     = aws_lightsail_disk.data[0].name
   instance_name = local.instance_name
   disk_path     = "/dev/xvdf"
 }

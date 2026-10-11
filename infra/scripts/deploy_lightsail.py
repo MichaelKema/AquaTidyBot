@@ -17,8 +17,8 @@ def validate_image(image):
 def secret_payload(environment):
     token = environment.get("DISCORD_TOKEN", "")
     timezone = environment.get("REMINDER_TIMEZONE", "UTC")
-    if not token or "\n" in token or "\r" in token:
-        raise ValueError("Set the DISCORD_TOKEN environment secret to a nonempty single-line token")
+    if "\n" in token or "\r" in token:
+        raise ValueError("DISCORD_TOKEN must be a single-line token")
     if not re.fullmatch(r"[A-Za-z0-9_+/-]+", timezone):
         raise ValueError("Invalid reminder timezone")
     return json.dumps({

@@ -8,7 +8,7 @@ for _ in $(seq 1 120); do
   sleep 5
 done
 [ -f /run/aquatidy-ready ] || { echo 'Host bootstrap is not ready' >&2; exit 1; }
-mountpoint -q /var/lib/aquatidy
+test -d /var/lib/aquatidy/data
 exec 9>/run/aquatidy-deploy.lock
 flock -w 300 9
 
@@ -23,6 +23,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 # Secret payload arrives on stdin, never in process arguments or Terraform state.
 cat > "$work/secret.json"
+# After initial provisioning, CI can reuse the root-only token already on the host.
+if jq -e '.Discord_Token == ""' "$work/secret.json" > /dev/null; then
+  [ -f /var/lib/aquatidy/bot.env ] || { echo 'Initial setup requires a Discord token' >&2; exit 1; }
+  jq --rawfile saved /var/lib/aquatidy/bot.env \
+    '.Discord_Token = ($saved | split("\n") | map(select(startswith("Discord_Token="))) | first | ltrimstr("Discord_Token="))' \
+    "$work/secret.json" > "$work/resolved.json"
+  mv "$work/resolved.json" "$work/secret.json"
+fi
 export DOCKER_CONFIG=/var/lib/aquatidy/docker
 reminder_timezone=$(jq -r .REMINDER_TIMEZONE "$work/secret.json")
 [[ "$reminder_timezone" =~ ^[A-Za-z0-9_+/-]+$ ]]

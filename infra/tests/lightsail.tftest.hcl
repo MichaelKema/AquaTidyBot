@@ -1,6 +1,7 @@
 mock_provider "aws" {}
 
 variables {
+  retain_legacy_data_disk     = false
   existing_instance_name      = null
   existing_instance_arn       = null
   create_github_oidc_provider = false
@@ -10,12 +11,8 @@ variables {
 run "lightsail_deployment" {
   command = plan
   assert {
-    condition     = aws_lightsail_disk_attachment.data.disk_path == "/dev/xvdf"
-    error_message = "The bootstrap disk path must match the attachment."
-  }
-  assert {
-    condition     = aws_lightsail_disk.data.availability_zone == aws_lightsail_instance.bot[0].availability_zone
-    error_message = "The persistent disk must remain in the instance's availability zone."
+    condition     = length(aws_lightsail_disk.data) == 0 && length(aws_lightsail_disk_attachment.data) == 0
+    error_message = "A new installation must not provision an unnecessary extra disk."
   }
   assert {
     condition     = length(aws_lightsail_instance_public_ports.bot[0].port_info) == 1 && one(aws_lightsail_instance_public_ports.bot[0].port_info).from_port == 22
@@ -26,8 +23,8 @@ run "lightsail_deployment" {
     error_message = "Deployment access must be scoped to this repository and production environment."
   }
   assert {
-    condition     = strcontains(aws_lightsail_instance.bot[0].user_data, "mountpoint -q /var/lib/aquatidy")
-    error_message = "The bot must refuse to run without its persistent data mount."
+    condition     = strcontains(aws_lightsail_instance.bot[0].user_data, "ExecStartPre=/usr/bin/test -d /var/lib/aquatidy/data")
+    error_message = "The bot must keep its database in the host data directory."
   }
 }
 
@@ -42,8 +39,8 @@ run "existing_aquatidy_instance" {
     error_message = "Existing-instance mode must leave the instance, firewall and IP unmanaged."
   }
   assert {
-    condition     = aws_lightsail_disk_attachment.data.instance_name == "AquaTidy" && output.instance_name == "AquaTidy"
-    error_message = "Disk and deployment settings must target the existing AquaTidy instance."
+    condition     = output.instance_name == "AquaTidy"
+    error_message = "Deployment settings must target the existing AquaTidy instance."
   }
   assert {
     condition     = jsondecode(aws_iam_role_policy.deploy.policy).Statement[0].Resource == var.existing_instance_arn
@@ -60,5 +57,16 @@ run "create_github_identity_provider" {
   assert {
     condition     = length(aws_iam_openid_connect_provider.github) == 1 && aws_iam_openid_connect_provider.github[0].url == "https://token.actions.githubusercontent.com" && toset(aws_iam_openid_connect_provider.github[0].client_id_list) == toset(["sts.amazonaws.com"])
     error_message = "Create the GitHub provider with the AWS STS audience."
+  }
+}
+
+run "retain_legacy_disk" {
+  command = plan
+  variables {
+    retain_legacy_data_disk = true
+  }
+  assert {
+    condition     = length(aws_lightsail_disk.data) == 1 && aws_lightsail_disk_attachment.data[0].disk_name == aws_lightsail_disk.data[0].name
+    error_message = "Existing extra storage must be retained until cleanup is reviewed."
   }
 }

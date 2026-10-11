@@ -87,3 +87,9 @@ variable "existing_instance_arn" {
     error_message = "Provide the existing instance ARN from the Lightsail API."
   }
 }
+
+variable "retain_legacy_data_disk" {
+  description = "Retain a previously provisioned extra disk until its deletion has been reviewed. SQLite uses the root disk. New installations need no extra disk."
+  type        = bool
+  default     = false
+}

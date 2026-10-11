@@ -15,6 +15,6 @@ output "public_ip" {
   value       = local.use_existing_instance ? null : aws_lightsail_static_ip.bot[0].ip_address
 }
 output "data_disk_name" {
-  description = "Persistent disk to snapshot for disaster recovery."
-  value       = aws_lightsail_disk.data.name
+  description = "Unused legacy disk retained pending reviewed cleanup; null for new installations."
+  value       = var.retain_legacy_data_disk ? aws_lightsail_disk.data[0].name : null
 }

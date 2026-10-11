@@ -6,7 +6,7 @@ Infrastructure is applied separately after reviewing a Terraform plan. The deplo
 
 ## Provision a managed Lightsail instance
 
-Install Terraform 1.14+ and the AWS CLI, and authenticate to your AWS account locally. For a new deployment, the module provisions an Ubuntu 22.04 instance, static IP, SSH firewall rule, separate encrypted Lightsail data disk and GitHub deployment role. For your existing AquaTidy server, use the existing-instance section below. The instance and disk must share an availability zone. Choose your region, zone and bundle; you can list bundles and blueprints with `aws lightsail get-bundles` and `aws lightsail get-blueprints`.
+Install Terraform 1.14+ and the AWS CLI, and authenticate to your AWS account locally. For a new deployment, the module provisions an Ubuntu 22.04 instance, static IP, SSH firewall rule and GitHub deployment role. For your existing AquaTidy server, use the existing-instance section below. Choose your region, zone and bundle; you can list bundles and blueprints with `aws lightsail get-bundles` and `aws lightsail get-blueprints`.
 
 If your account has no GitHub OIDC provider, set `create_github_oidc_provider = true` and leave `github_oidc_provider_arn` unset; Terraform creates it with audience `sts.amazonaws.com`. Otherwise, keep creation disabled and provide the existing provider ARN for `https://token.actions.githubusercontent.com`. The trust policy restricts access to this repository's `production` environment. If your repository uses customized or immutable-ID OIDC subjects, set `github_oidc_subject` to its exact claim. [GitHub's AWS OIDC documentation](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws) explains the claim formats.
 
@@ -49,7 +49,7 @@ Set these **production environment secrets**:
 
 | Secret | Value |
 | --- | --- |
-| `DISCORD_TOKEN` | Discord bot token, required |
+| `DISCORD_TOKEN` | Required for a fresh host; optional afterward (reuse the token saved on the host) |
 | `GHCR_USERNAME` | Optional GitHub username for pulling a private image |
 | `GHCR_READ_TOKEN` | Optional personal access token with `read:packages`, allowed to read this package |
 
@@ -57,7 +57,7 @@ GHCR packages initially may be private. Either make this bot's package public af
 
 Push to the default branch or run **CI and CD** manually on that branch. Without the deployment role and instance variables, CI and image publishing work while deployment is skipped. The AWS CLI requests temporary SSH keys and trusted host keys through [Lightsail's access API](https://docs.aws.amazon.com/lightsail/2016-11-28/api-reference/API_InstanceAccessDetails.html). Private keys stay in a temporary runner directory. Strict host verification is enabled; secrets reach the host through encrypted SSH stdin, not Terraform or command arguments.
 
-Allow the first bootstrap several minutes to install Docker and mount the disk. The deployment script waits for a ready marker. Its startup check verifies the container process stays running for 20 seconds, not a Discord login or successful reminder. Check the bot in Discord after the first deployment.
+Allow the first bootstrap several minutes to install Docker and create the host data directory. The deployment script waits for a ready marker. Its startup check verifies the container process stays running for 20 seconds, not a Discord login or successful reminder. Check the bot in Discord after the first deployment.
 
 ## Your existing AquaTidy instance
 
@@ -75,7 +75,9 @@ aws lightsail get-disks --region us-east-1 \
   --query "disks[?attachedTo=='AquaTidy'].[name,path,sizeInGb]"
 ```
 
-The public example uses a placeholder instance ARN. Your confirmed ARN is saved locally in the ignored `infra/terraform.tfvars`; keep this file private. Your CloudShell check returned no OIDC providers, so provider creation is enabled. Review the disk inventory before applying. This mode manages the GitHub OIDC provider, deployment IAM role and a **new 8 GB data disk attached to AquaTidy at /dev/xvdf**. It leaves the existing instance, firewall and IP outside Terraform management, so no instance import is needed. If that attachment path is already occupied or you already have a suitable data disk, resolve its ownership/association before applying this plan. The attached disk is additional storage, independent of the existing 20 GB root disk.
+The public example uses a placeholder instance ARN. Keep your actual settings in the ignored `infra/terraform.tfvars`. Existing-instance mode manages the deployment IAM role and optionally the GitHub OIDC provider. It leaves the instance, firewall and IP outside Terraform management. SQLite uses the existing root disk, so new installations provision no additional disk.
+
+An earlier deployment provisioned an unused `aquatidy-data` disk. The local settings retain it with `retain_legacy_data_disk = true`, pending a reviewed detach/delete operation. Terraform moved blocks preserve its existing state addresses. Do not remove its resource blocks or local state as a shortcut to cleanup.
 
 Run the init, validation and plan commands above, review the planned resources, then apply. Ensure your current Lightsail firewall permits SSH from the workflow runner; existing mode leaves those rules as they are. In GitHub, set `LIGHTSAIL_INSTANCE_NAME=AquaTidy` and `AWS_REGION=us-east-1`, plus the role ARN and secrets documented above. The workflow obtains the current IP from the Lightsail API rather than hardcoding the screenshot's address.
 
@@ -86,16 +88,16 @@ python infra/scripts/render_bootstrap.py --repository MichaelKema/AquaTidyBot > 
 # Upload to AquaTidy over your existing SSH connection, then run as root.
 ```
 
-The bootstrap uses Ubuntu's apt package manager and systemd and expects the dedicated disk at **/dev/xvdf**. It formats only a blank disk, preserves ext4, and refuses other filesystems or partitioned disks. Ensure this is the intended bot data disk before running it. Stop the current bot process before enabling CD. If it already uses SQLite, copy its database while stopped to `/var/lib/aquatidy/data/aquatidy.sqlite3` after mounting the disk. Older in-memory deployments need `!start` once per server after the upgrade. Image builds run on GitHub's runner, not on your 512 MB instance.
+The bootstrap uses Ubuntu's apt package manager and systemd. It creates `/var/lib/aquatidy/data` on the existing root disk and installs the `aquatidy` service and daily backup timer. It does not format or mount an extra disk. Pull the image before stopping the old bot, then deploy with the token read on the host. Disable the old service only after confirming the new bot has connected. Run only one bot process. Older in-memory deployments need `!start #channel America/New_York` once per server after the upgrade. Use your preferred IANA timezone. Image builds run on GitHub's runner, not the 512 MB instance.
 
 ## Persistence, updates and recovery
 
-SQLite lives at `/var/lib/aquatidy/data/aquatidy.sqlite3` on the attached disk, mounted into the container at `/data`. Image selection, bot environment and optional registry credentials also live on this root-only disk. [Lightsail encrypts attached disks and snapshots at rest](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-faq-block-storage.html).
+SQLite lives at `/var/lib/aquatidy/data/aquatidy.sqlite3`, mounted into the container at `/data`. Replacing the container or restarting the service preserves this file. Image selection, bot environment and optional registry credentials also live under `/var/lib/aquatidy`, with access restricted to root. An empty deployment token reuses the saved host token; provide `DISCORD_TOKEN` to initialize a fresh server or rotate it.
 
-The disk has `prevent_destroy`. Keep its resource block and Terraform state; removing the block removes that lifecycle protection. Before replacing an instance, stop the bot, snapshot the disk, and retain the disk in the same availability zone. The replacement bootstrap mounts it and pulls the saved image. The service refuses to run without the mount, avoiding accidental writes to an ephemeral root disk. The pipeline serializes deployments and the host also uses a deployment lock. Run only one bot process.
+The `aquatidy-backup.timer` runs daily and after a missed scheduled run. The script uses SQLite's online backup API, checks integrity, compresses the result and removes backups older than seven days. Backups live at `/var/lib/aquatidy/backups`. Run `sudo /usr/local/bin/aquatidy-backup` to create one immediately. These local backups protect against database mistakes; they do not survive loss of the whole instance disk. Copy backups to separate storage or retain Lightsail instance snapshots before replacing the server. Provisioning a replacement instance alone does not restore the database or token.
 
-Each update pulls the image before stopping the current service. Startup failures restore the previous image and environment; this does not roll back database schema changes. For a manual rollback, rerun `aquatidy-deploy` with the earlier `ghcr.io/OWNER/REPO@sha256:DIGEST` and the same JSON secret payload on stdin through a trusted SSH session. Secrets should not appear in shell history.
+Each update pulls an immutable image before stopping the current service. Startup failures restore the previous image and environment; this does not roll back database schema changes. The workflow serializes deployments and the host uses a deployment lock. The deployment check verifies that the container stays running for 20 seconds; check Discord login and reminder configuration after initial deployment.
 
-Stop the service before making a disk snapshot for a consistent SQLite backup. A separate disk survives instance replacement; snapshots are needed to recover from disk loss or accidental file deletion. Restore snapshots in the same zone and update/import Terraform's disk association before mounting them. Changing disk size, zone, or instance configuration may require replacement; inspect every infrastructure plan. Decommission the instance separately from the retained disk.
+For recovery, stop `aquatidy`, decompress a verified backup to `/var/lib/aquatidy/data/aquatidy.sqlite3`, remove stale `-wal` and `-shm` files while the service is stopped, and start the service. Keep the saved image and environment files, or initialize the replacement host with the token over trusted SSH. Do not put tokens in shell history or Terraform variables/state.
 
-On the host, inspect `sudo systemctl status aquatidy`, `sudo journalctl -u aquatidy`, `sudo docker logs aquatidy`, and `/var/log/cloud-init-output.log`. Deployment secrets and configuration files are root-only. Docker log rotation bounds local log growth.
+On the host, inspect `sudo systemctl status aquatidy`, `sudo journalctl -u aquatidy`, `sudo docker logs aquatidy`, and `sudo systemctl status aquatidy-backup.timer`. Docker log rotation bounds local log growth. Review every Terraform plan before applying infrastructure changes.

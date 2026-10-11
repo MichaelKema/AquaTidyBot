@@ -18,9 +18,12 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(deploy.validate_image(IMAGE), IMAGE)
 
     def test_requires_single_line_token(self):
-        for token in ("", "token\nOTHER=value", "token\r"):
+        for token in ("token\nOTHER=value", "token\r"):
             with self.subTest(token=token), self.assertRaises(ValueError):
                 deploy.secret_payload({"DISCORD_TOKEN": token})
+
+    def test_empty_token_allows_host_token_reuse(self):
+        self.assertEqual(json.loads(deploy.secret_payload({}))["Discord_Token"], "")
 
     def test_missing_host_keys_fail_closed(self):
         with self.assertRaises(ValueError):
@@ -56,7 +59,7 @@ class DeploymentTests(unittest.TestCase):
 
 class RolloutTests(unittest.TestCase):
     """Exercise the real rollout script with isolated disk paths and fake host services."""
-    def run_rollout(self, failure):
+    def run_rollout(self, failure, token="new-token"):
         import os
         import shutil
         import subprocess
@@ -67,6 +70,7 @@ class RolloutTests(unittest.TestCase):
             root = Path(directory)
             state = root / "state"
             state.mkdir()
+            (state / "data").mkdir()
             (state / "image").write_text("old-image\n")
             (state / "bot.env").write_text("Discord_Token=old-token\n")
             (root / "aquatidy-ready").touch()
@@ -100,7 +104,7 @@ exit 0
             environment = dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ["PATH"],
                                FAILURE=failure, SERVICE_LOG=str(root / "service.log"))
             result = subprocess.run(["bash", str(script_path), IMAGE],
-                                    input=deploy.secret_payload({"DISCORD_TOKEN": "new-token"}),
+                                    input=deploy.secret_payload({"DISCORD_TOKEN": token}),
                                     text=True, capture_output=True, env=environment)
             service_log = (root / "service.log").read_text() if (root / "service.log").exists() else ""
             return result.returncode, (state / "image").read_text(), (state / "bot.env").read_text(), service_log
@@ -125,3 +129,9 @@ exit 0
         self.assertEqual(image, IMAGE + "\n")
         self.assertEqual(env, "Discord_Token=new-token\nREMINDER_TIMEZONE=UTC\n")
         self.assertEqual(log.count("start aquatidy\n"), 1)
+
+
+    def test_existing_host_token_is_reused_when_ci_secret_is_unset(self):
+        code, image, env, log = self.run_rollout("", token="")
+        self.assertEqual(code, 0)
+        self.assertEqual(env, "Discord_Token=old-token\nREMINDER_TIMEZONE=UTC\n")

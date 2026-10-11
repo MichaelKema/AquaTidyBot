@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-mountpoint -q /var/lib/aquatidy
+test -d /var/lib/aquatidy/data
 image=$(cat /var/lib/aquatidy/image)
 export DOCKER_CONFIG=/var/lib/aquatidy/docker
 # A replacement instance restores its saved image from the persistent disk.

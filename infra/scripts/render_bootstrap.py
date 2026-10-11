@@ -11,6 +11,7 @@ def render(repository):
     content = (infra / "cloud-init.sh.tftpl").read_text()
     for name, value in {
         "repository": repository.lower(),
+        "backup_script": (infra / "scripts/backup.sh").read_text(),
         "deploy_script": (infra / "scripts/deploy.sh").read_text(),
         "run_script": (infra / "scripts/run.sh").read_text(),
     }.items():
@@ -21,4 +22,5 @@ def render(repository):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", default="MichaelKema/AquaTidyBot")
-    print(render(parser.parse_args().repository), end="")
+    args = parser.parse_args()
+    print(render(args.repository), end="")
